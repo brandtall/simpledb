@@ -22,7 +22,22 @@ pub const InputBuffer = struct {
     }
 };
 
+pub const Statement = struct {
+    statementType: StatementTypes,
+    RowToInsert: ?Row = null,
+};
+
+pub const COLUMN_EMAIL_LENGTH = 255;
+pub const COLUMN_USERNAME_LENGTH = 255;
+
+pub const Row = struct {
+    username: [COLUMN_USERNAME_LENGTH]u8,
+    email: [COLUMN_EMAIL_LENGTH]u8,
+};
+
 const StatementTypes = enum { StatementInsert, StatementSelect, StatementUnknown };
+const PrepareResult = enum { PreparedSuccess, PreparedSyntaxError, PreparedUnknown };
+const ExecuteResult = enum { ExecuteSuccess, ExecuteTableFull };
 
 const MetaCommands = enum { MetaCommandExit, MetaCommandUnknown };
 const InputError = error{
@@ -42,6 +57,9 @@ pub fn main() !void {
         printPrompt();
         try readInput(inputBuffer);
         const command = inputBuffer.buffer[0..inputBuffer.input_length];
+        if (command.len == 0) {
+            continue;
+        }
         if (command[0] == '.') {
             switch (doMetaCommand(command)) {
                 MetaCommands.MetaCommandExit => {
@@ -53,19 +71,19 @@ pub fn main() !void {
                 },
             }
         } else {
-            switch (prepareStatement(command)) {
-                StatementTypes.StatementInsert => {
-                    std.debug.print("This is where we do an insert \n", .{});
+            var statement = Statement{ .statementType = StatementTypes.StatementUnknown };
+            switch (prepareStatement(command, &statement)) {
+                PrepareResult.PreparedSuccess => {},
+                PrepareResult.PreparedSyntaxError => {
+                    std.debug.print("Syntax error. Could not parse statement {s} \n", .{command});
                     continue;
                 },
-                StatementTypes.StatementSelect => {
-                    std.debug.print("This is where we do a select \n", .{});
-                    continue;
-                },
-                StatementTypes.StatementUnknown => {
+                PrepareResult.PreparedUnknown => {
+                    std.debug.print("Unrecogonized statement command '{s}'. \n", .{command});
                     continue;
                 },
             }
+            _ = executeStatement(statement);
         }
     }
 }
@@ -79,14 +97,31 @@ pub fn doMetaCommand(command: []u8) MetaCommands {
     }
 }
 
-pub fn prepareStatement(command: []u8) StatementTypes {
+pub fn prepareStatement(command: []u8, statement: *Statement) PrepareResult {
     if (std.mem.eql(u8, command, "insert")) {
-        return StatementTypes.StatementInsert;
+        statement.* = Statement{ .statementType = StatementTypes.StatementInsert, .RowToInsert = null };
+        return PrepareResult.PreparedSuccess;
     } else if (std.mem.eql(u8, command, "select")) {
-        return StatementTypes.StatementSelect;
+        statement.* = Statement{ .statementType = StatementTypes.StatementSelect, .RowToInsert = null };
+        return PrepareResult.PreparedSuccess;
     }
-    std.debug.print("Unrecogonized statement command '{s}'. \n", .{command});
-    return StatementTypes.StatementUnknown;
+    return PrepareResult.PreparedUnknown;
+}
+pub fn executeStatement(statement: Statement) ExecuteResult {
+    switch (statement.statementType) {
+        StatementTypes.StatementInsert => {
+            std.debug.print("This is where we do an insert \n", .{});
+            return ExecuteResult.ExecuteSuccess;
+        },
+        StatementTypes.StatementSelect => {
+            std.debug.print("This is where we do a select \n", .{});
+            return ExecuteResult.ExecuteSuccess;
+        },
+        StatementTypes.StatementUnknown => {
+            std.debug.print("Error: Unknown statement type\n", .{});
+            return ExecuteResult.ExecuteTableFull;
+        },
+    }
 }
 
 pub fn printPrompt() void {
